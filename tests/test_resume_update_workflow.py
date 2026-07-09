@@ -80,3 +80,55 @@ def test_resume_update_edits_uploaded_pdf_text_layer(tmp_path):
     assert "4 years" in updated_text
     assert output["pdf_edit_status"]["mode"] == "original_pdf"
     assert output["pdf_edit_status"]["applied"] == 1
+
+
+def test_pdf_replacement_uses_original_text_baseline(tmp_path):
+    fitz = __import__("fitz")
+    pdf_path = tmp_path / "baseline.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    original_point = (72, 144)
+    page.insert_text(original_point, "Replace Alpha Value", fontsize=11)
+    document.save(pdf_path)
+    document.close()
+
+    output = UpdateResumeFromInstructionTool().run(
+        {
+            "resume_text": "Replace Alpha Value",
+            "instruction": 'replace "Alpha" with "Beta"',
+            "source_file": str(pdf_path),
+        }
+    )
+
+    updated_pdf = fitz.open(output["updated_resume_pdf_path"])
+    words = updated_pdf[0].get_text("words")
+    updated_pdf.close()
+    beta = next(word for word in words if word[4] == "Beta")
+    beta_baseline_y = beta[3]
+    assert abs(beta_baseline_y - original_point[1]) < 8
+
+
+def test_pdf_explicit_replacement_updates_all_matching_locations(tmp_path):
+    fitz = __import__("fitz")
+    pdf_path = tmp_path / "multi.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 96), "Project status: Draft")
+    page.insert_text((72, 140), "Footer status: Draft")
+    document.save(pdf_path)
+    document.close()
+
+    output = UpdateResumeFromInstructionTool().run(
+        {
+            "resume_text": "Project status: Draft\nFooter status: Draft",
+            "instruction": 'replace "Draft" with "Final"',
+            "source_file": str(pdf_path),
+        }
+    )
+
+    updated_pdf = fitz.open(output["updated_resume_pdf_path"])
+    updated_text = "\n".join(page.get_text() for page in updated_pdf)
+    updated_pdf.close()
+    assert updated_text.count("Final") == 2
+    assert "Draft" not in updated_text
+    assert output["pdf_edit_status"]["applied"] == 2

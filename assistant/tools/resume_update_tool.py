@@ -17,6 +17,7 @@ class DocumentEdit:
     old: str
     new: str
     scope: str = "document"
+    replace_all: bool = False
 
 
 class UpdateResumeFromInstructionTool(AssistantTool):
@@ -68,7 +69,7 @@ class UpdateResumeFromInstructionTool(AssistantTool):
             flags=re.IGNORECASE | re.DOTALL,
         )
         for match in quoted:
-            edits.append(DocumentEdit("explicit replacement", match.group("old").strip(), match.group("new").strip()))
+            edits.append(DocumentEdit("explicit replacement", match.group("old").strip(), match.group("new").strip(), replace_all=True))
 
         plain = re.finditer(
             r"(?:replace|change|update)\s+(?P<old>[A-Za-z0-9][^.\n]{1,80}?)\s+(?:with|to)\s+(?P<new>[A-Za-z0-9][^.\n]{1,80})",
@@ -79,7 +80,7 @@ class UpdateResumeFromInstructionTool(AssistantTool):
             old = self._clean_instruction_value(match.group("old"))
             new = self._clean_instruction_value(match.group("new"))
             if old and new and not self._looks_like_field_name(old):
-                edits.append(DocumentEdit("explicit replacement", old, new))
+                edits.append(DocumentEdit("explicit replacement", old, new, replace_all=True))
         return edits
 
     def _field_edits(self, document_text: str, instruction: str) -> list[DocumentEdit]:
@@ -147,6 +148,8 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         for edit in edits:
             if edit.scope == "summary":
                 updated = self._replace_in_section(updated, "SUMMARY", edit.old, edit.new)
+            elif edit.replace_all:
+                updated = self._replace_all(updated, edit.old, edit.new)
             else:
                 updated = self._replace_once(updated, edit.old, edit.new)
         return updated
@@ -165,6 +168,10 @@ class UpdateResumeFromInstructionTool(AssistantTool):
     def _replace_once(self, text: str, old: str, new: str) -> str:
         pattern = re.compile(re.escape(old), flags=re.IGNORECASE)
         return pattern.sub(new, text, count=1)
+
+    def _replace_all(self, text: str, old: str, new: str) -> str:
+        pattern = re.compile(re.escape(old), flags=re.IGNORECASE)
+        return pattern.sub(new, text)
 
     def _write_updated_pdf(self, path: Path, updated_text: str, source_file: str, edits: list[DocumentEdit]) -> dict:
         source_path = Path(source_file)
@@ -189,8 +196,7 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         try:
             with fitz.open(source_path) as document:
                 for edit in edits:
-                    if self._apply_pdf_edit(document, edit):
-                        applied += 1
+                    applied += self._apply_pdf_edit(document, edit)
                 if not applied:
                     return {"mode": "original_pdf", "applied": 0, "requested": len(edits), "warning": "No matching selectable PDF text found."}
                 document.save(output_path, garbage=4, deflate=True)
@@ -198,21 +204,71 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         except Exception as exc:
             return {"mode": "original_pdf", "applied": applied, "requested": len(edits), "warning": str(exc)}
 
-    def _apply_pdf_edit(self, document: object, edit: DocumentEdit) -> bool:
-        changed = False
+    def _apply_pdf_edit(self, document: object, edit: DocumentEdit) -> int:
+        changed = 0
         for page in document:
             rects = page.search_for(edit.old)
             if not rects:
                 continue
-            rect = rects[0]
-            page.add_redact_annot(rect, fill=(1, 1, 1))
+            targets = rects if edit.replace_all else rects[:1]
+            styles = [(rect, self._style_for_match(page, rect, edit.old)) for rect in targets]
+            for rect, _style in styles:
+                page.add_redact_annot(rect, fill=(1, 1, 1))
             page.apply_redactions()
-            font_size = max(6, min(12, rect.height * 0.72))
-            write_rect = rect + (-1, -2, 80, 4)
-            page.insert_textbox(write_rect, edit.new, fontsize=font_size, fontname="helv", color=(0, 0, 0), align=0)
-            changed = True
-            break
+            for _rect, style in styles:
+                page.insert_text(
+                    style["origin"],
+                    edit.new,
+                    fontsize=style["size"],
+                    fontname="helv",
+                    color=style["color"],
+                )
+                changed += 1
+            if changed and not edit.replace_all:
+                break
         return changed
+
+    def _style_for_match(self, page: object, rect: object, old_text: str) -> dict:
+        fallback = {
+            "origin": (rect.x0, rect.y1 - max(1, rect.height * 0.2)),
+            "size": max(6, rect.height * 0.72),
+            "color": (0, 0, 0),
+        }
+        try:
+            text = page.get_text("dict", clip=rect + (-2, -4, 2, 4))
+        except Exception:
+            return fallback
+        normalized_old = self._normalize_match_text(old_text)
+        best_span = None
+        for block in text.get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    span_text = span.get("text", "")
+                    if normalized_old in self._normalize_match_text(span_text):
+                        best_span = span
+                        break
+                if best_span:
+                    break
+            if best_span:
+                break
+        if not best_span:
+            return fallback
+        origin = best_span.get("origin") or (rect.x0, rect.y1 - max(1, rect.height * 0.2))
+        size = float(best_span.get("size") or fallback["size"])
+        color = self._pdf_color(best_span.get("color", 0))
+        return {"origin": (origin[0], origin[1]), "size": size, "color": color}
+
+    def _normalize_match_text(self, value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip().lower()
+
+    def _pdf_color(self, color_value: int) -> tuple[float, float, float]:
+        try:
+            red = ((int(color_value) >> 16) & 255) / 255
+            green = ((int(color_value) >> 8) & 255) / 255
+            blue = (int(color_value) & 255) / 255
+            return (red, green, blue)
+        except Exception:
+            return (0, 0, 0)
 
     def _build_edit_report(
         self,
@@ -267,7 +323,7 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         output: list[DocumentEdit] = []
         seen: set[tuple[str, str, str]] = set()
         for edit in edits:
-            key = (edit.old.lower(), edit.new.lower(), edit.scope)
+            key = (edit.old.lower(), edit.new.lower(), edit.scope, str(edit.replace_all))
             if edit.old and edit.new and edit.old.lower() != edit.new.lower() and key not in seen:
                 output.append(edit)
                 seen.add(key)
