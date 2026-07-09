@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Agentic Document Speech Assistant</title>
+    <link rel="stylesheet" href="styles.css?v=6" />
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <div>
+          <h1>Local Agentic Document + Speech Assistant</h1>
+          <p>Agent planning, OCR, ASR, translation, RAG, evaluation, citations, and reports in one local workflow.</p>
+        </div>
+        <div class="header-actions">
+          <span id="health" class="pill">API: checking</span>
+          <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="input-panel">
+        <h2>Input Workbench</h2>
+        <div class="tabs">
+          <button id="uploadTab" type="button" onclick="setInputMode('upload')">Upload</button>
+          <button id="pathTab" class="secondary" type="button" onclick="setInputMode('path')">Path</button>
+          <button id="sampleTab" class="secondary" type="button" onclick="setInputMode('sample')">Sample</button>
+        </div>
+
+        <div id="uploadPanel">
+          <label>Document, PDF, or text file
+            <input id="docUpload" type="file" accept=".txt,.text,.md,.json,.csv,.pdf,text/plain,application/pdf" />
+          </label>
+          <label>Audio or transcript file
+            <input id="audioUpload" type="file" accept=".txt,.md,.wav,.mp3,.m4a,.flac" />
+          </label>
+          <div class="actions compact-actions">
+            <button id="transcribeBtn" type="button" class="secondary">Transcribe Audio</button>
+            <span id="transcriptStatus" class="status">No transcript yet</span>
+          </div>
+          <div class="hint">Text/PDF uploads are extracted locally. Audio is transcribed first, displayed below, then fed into the agent as the resume update instruction.</div>
+        </div>
+
+        <div id="pathPanel" class="hidden">
+          <label>Document path
+            <input id="docPath" value="examples/sample_invoice.txt" />
+          </label>
+          <label>Audio path
+            <input id="audioPath" value="examples/sample_transcript.txt" />
+          </label>
+        </div>
+
+        <div id="samplePanel" class="hidden">
+          <div class="sample-grid">
+            <button type="button" class="secondary" onclick="loadSample('invoice')">Invoice</button>
+            <button type="button" class="secondary" onclick="loadSample('receipt')">Receipt</button>
+            <button type="button" class="secondary" onclick="loadSample('transcript')">Transcript</button>
+          </div>
+          <label>Sample text
+            <textarea id="sampleText" rows="9"></textarea>
+          </label>
+        </div>
+
+        <div class="row">
+          <label>Workflow
+            <select id="workflow">
+              <option value="agent">Full agent workflow</option>
+              <option value="ingest">Ingest document</option>
+              <option value="search">Search chunks</option>
+              <option value="asr">Run mock ASR</option>
+              <option value="report">Generate report</option>
+            </select>
+          </label>
+          <label>Top K
+            <input id="topK" type="number" min="1" max="10" value="5" />
+          </label>
+        </div>
+
+        <label>User request
+          <textarea id="question" rows="7">Read this resume PDF, extract and summarize it, transcribe the recording, update the resume as per the recording instruction, evaluate quality, and generate a report.</textarea>
+        </label>
+
+        <label>Extracted audio transcript / edit instruction
+          <textarea id="audioTranscript" rows="6" placeholder="Click Transcribe Audio, or paste the recording command here. This exact text is fed into the agent to update the resume."></textarea>
+        </label>
+
+        <label>Reference JSON for evaluation
+          <textarea id="referenceJson" rows="7">{
+  "fields": {
+    "vendor": "Example Medical Store",
+    "date": "2026-07-09",
+    "total_amount": "₹1,250"
+  },
+  "expected_terms": ["vendor", "date", "total"]
+}</textarea>
+        </label>
+
+        <div class="actions">
+          <button id="runBtn" type="button">Run Workflow</button>
+          <button id="clearBtn" type="button" class="secondary">Clear</button>
+          <span id="status" class="status">Ready</span>
+        </div>
+      </section>
+
+      <section class="result-panel">
+        <div class="panel-title">
+          <div>
+            <h2>Agent Result</h2>
+            <p class="hint">Plan, evidence, fields, metrics, reports, and raw JSON are shown after each run.</p>
+          </div>
+          <div class="toolbar">
+            <button id="downloadJson" type="button" class="secondary">Download JSON</button>
+            <button id="downloadMd" type="button" class="secondary">Download Markdown Link</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><b id="toolCount">-</b><span>Tools used</span></div>
+          <div class="metric"><b id="fieldCount">-</b><span>Fields</span></div>
+          <div class="metric"><b id="evidenceCount">-</b><span>Evidence chunks</span></div>
+          <div class="metric"><b id="qualityScore">-</b><span>Field accuracy</span></div>
+        </div>
+
+        <div class="split">
+          <div>
+            <h2>Document Preview</h2>
+            <div id="preview" class="docbox"><pre>Select an input or load a sample to preview source text.</pre></div>
+          </div>
+          <div>
+            <h2>Final Answer</h2>
+            <div class="answerbox">
+              <strong id="answer">No answer yet.</strong>
+              <p id="summary">Run the workflow to generate a grounded summary.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div>
+            <h2>Agent Plan</h2>
+            <div class="table-wrap">
+              <table>
+                <colgroup><col class="narrow-col" /><col class="field-col" /><col /></colgroup>
+                <thead><tr><th>#</th><th>Tool</th><th>Reason</th></tr></thead>
+                <tbody id="planRows"><tr><td colspan="3" class="muted">No plan yet.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <h2>Extracted Fields</h2>
+            <div class="table-wrap">
+              <table>
+                <colgroup><col class="field-col" /><col /></colgroup>
+                <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                <tbody id="fieldRows"><tr><td colspan="2" class="muted">No fields yet.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <h2>Retrieved Evidence</h2>
+        <div class="table-wrap">
+          <table>
+            <colgroup><col class="field-col" /><col class="field-col" /><col class="score-col" /><col /></colgroup>
+            <thead><tr><th>Source</th><th>Chunk</th><th>Score</th><th>Snippet</th></tr></thead>
+            <tbody id="evidenceRows"><tr><td colspan="4" class="muted">No evidence retrieved yet.</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="split lower">
+          <div>
+            <h2>Evaluation Metrics</h2>
+            <div class="table-wrap">
+              <table>
+                <colgroup><col class="field-col" /><col /></colgroup>
+                <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                <tbody id="metricRows"><tr><td colspan="2" class="muted">No metrics yet.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <h2>Report Artifacts</h2>
+            <div class="artifact-grid">
+              <div><span>Report ID</span><b id="reportId">-</b></div>
+              <div><span>JSON</span><b id="jsonPath">-</b></div>
+              <div><span>Markdown</span><b id="markdownPath">-</b></div>
+            </div>
+          </div>
+        </div>
+
+        <h2>Updated Resume</h2>
+        <div class="artifact-grid updated-resume-meta">
+          <div><span>Updated Resume Markdown</span><b id="updatedResumePath">-</b></div>
+          <div><span>Changes Applied</span><b id="changesApplied">-</b></div>
+        </div>
+        <pre id="updatedResume">No updated resume generated yet.</pre>
+
+        <h2>Raw JSON</h2>
+        <pre id="result">{}</pre>
+      </section>
+    </main>
+
+    <script src="app.js?v=6"></script>
+  </body>
+</html>

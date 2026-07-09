@@ -1,0 +1,5 @@
+{
+  "request": "Read this invoice, extract the vendor, date, total amount, summarize it, evaluate quality, and generate a report.",
+  "file_path": "examples/sample_invoice.txt"
+}
+

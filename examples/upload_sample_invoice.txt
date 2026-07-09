@@ -1,0 +1,14 @@
+Vendor: Example Medical Store
+Invoice Number: INV-UPLOAD-001
+Date: 2026-07-09
+
+Items:
+- Digital thermometer: ₹450
+- First aid kit: ₹600
+- Sanitizer: ₹200
+
+Total Amount: ₹1,250
+Payment Method: UPI
+
+Upload note: This text file is designed for the local website upload workflow.
+

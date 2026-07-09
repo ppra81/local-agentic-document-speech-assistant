@@ -1,0 +1,9 @@
+services:
+  local-agentic-assistant:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./reports:/app/reports
+      - ./.local_data:/app/.local_data
+

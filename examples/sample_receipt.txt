@@ -1,0 +1,8 @@
+Store: Local Grocery Mart
+Receipt No: R-10042
+Date: 2026-07-09
+Rice: ₹700
+Milk: ₹120
+Vegetables: ₹430
+Total Amount: ₹1,250
+

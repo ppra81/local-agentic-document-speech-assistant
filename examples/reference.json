@@ -1,0 +1,11 @@
+{
+  "text": "Vendor: Example Medical Store\nInvoice Number: INV-2026-0709\nDate: 2026-07-09\nTotal Amount: ₹1,250",
+  "fields": {
+    "vendor": "Example Medical Store",
+    "invoice_number": "INV-2026-0709",
+    "date": "2026-07-09",
+    "total_amount": "₹1,250"
+  },
+  "expected_terms": ["total", "vendor", "date"]
+}
+

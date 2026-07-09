@@ -1,0 +1,2 @@
+This is a mock audio transcript. The speaker asks the assistant to summarize an invoice and identify the total amount due.
+
