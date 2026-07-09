@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local Agentic Document Speech Assistant</title>
-    <link rel="stylesheet" href="styles.css?v=9" />
+    <link rel="stylesheet" href="styles.css?v=10" />
   </head>
   <body>
     <header>
@@ -70,7 +70,7 @@
               <option value="agent">Full agent workflow</option>
               <option value="ingest">Ingest document</option>
               <option value="search">Search chunks</option>
-              <option value="asr">Run mock ASR</option>
+              <option value="asr">Transcribe audio</option>
               <option value="report">Generate report</option>
             </select>
           </label>
@@ -147,7 +147,7 @@
             <h2>Agentic Change Check</h2>
             <div class="answerbox">
               <strong id="changeCheck">No resume update run yet.</strong>
-              <p>The updated resume panel below should include the transcript instruction, applied changes, and generated Markdown.</p>
+              <p>The updated document panel below should show the transcript instruction, applied edits, and downloadable PDF.</p>
             </div>
           </div>
         </div>
@@ -205,10 +205,10 @@
           </div>
         </div>
 
-        <h2>Updated Resume</h2>
+        <h2>Updated Document</h2>
         <div class="artifact-grid updated-resume-meta">
-          <div><span>Updated Resume Markdown</span><b id="updatedResumePath">-</b></div>
-          <div><span>Updated Resume PDF</span><b id="updatedResumePdfPath">-</b></div>
+          <div><span>Updated Markdown</span><b id="updatedResumePath">-</b></div>
+          <div><span>Updated PDF</span><b id="updatedResumePdfPath">-</b></div>
           <div><span>Changes Applied</span><b id="changesApplied">-</b></div>
         </div>
         <div class="toolbar updated-downloads">
@@ -222,6 +222,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=9"></script>
+    <script src="app.js?v=10"></script>
   </body>
 </html>

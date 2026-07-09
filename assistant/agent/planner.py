@@ -25,8 +25,10 @@ class AgentPlanner:
             steps.append(PlanStep(tool="tool_search_document_chunks", reason="Relevant evidence should be retrieved from chunks."))
         if any(term in text for term in ["summarize", "summary", "extract", "field", "answer", "read"]):
             steps.append(PlanStep(tool="tool_summarize_document", reason="The user asked for a summary, answer, or extracted fields."))
-        if "resume" in text and any(term in text for term in ["change", "update", "revise", "recording", "audio"]):
-            steps.append(PlanStep(tool="tool_update_resume_from_instruction", reason="The user wants the resume changed using the recording or extracted instruction."))
+        wants_edit = any(term in text for term in ["change", "update", "revise", "replace", "edit"])
+        editable_document = is_document or any(term in text for term in ["resume", "document", "pdf"])
+        if editable_document and (wants_edit or has_audio):
+            steps.append(PlanStep(tool="tool_update_resume_from_instruction", reason="The user wants the uploaded document changed using the typed or transcribed instruction."))
         if "evaluate" in text or "quality" in text:
             steps.append(PlanStep(tool="tool_evaluate_output", reason="The user asked to evaluate output quality."))
         if "report" in text or True:

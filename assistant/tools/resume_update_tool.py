@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -10,9 +11,17 @@ from assistant.tools.base import AssistantTool
 from assistant.utils.ids import new_id
 
 
+@dataclass(frozen=True)
+class DocumentEdit:
+    label: str
+    old: str
+    new: str
+    scope: str = "document"
+
+
 class UpdateResumeFromInstructionTool(AssistantTool):
     name = "tool_update_resume_from_instruction"
-    description = "Update a resume/profile document using transcribed audio or text instructions."
+    description = "Edit an uploaded document or resume PDF using transcribed audio or text instructions."
     input_schema = {"resume_text": "str", "instruction": "str", "source_file": "str optional"}
     output_schema = {"updated_resume_markdown": "str", "updated_resume_path": "str", "updated_resume_pdf_path": "str", "changes": "list"}
 
@@ -20,186 +29,263 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         self.adapter = LocalRuleBasedAdapter()
 
     def run(self, input_data: dict) -> dict:
-        resume_text = input_data.get("resume_text") or input_data.get("text", "")
+        document_text = input_data.get("resume_text") or input_data.get("text", "")
         instruction = input_data.get("instruction") or input_data.get("transcript") or input_data.get("request", "")
-        source_file = input_data.get("source_file") or input_data.get("file_path") or "uploaded_resume"
-        updated_resume_text, edit = self._apply_instruction_edits(resume_text, instruction)
-        fields = self.adapter.extract_resume_fields(updated_resume_text)
-        changes = self._infer_changes(instruction, edit)
-        updated = self._build_updated_resume(updated_resume_text, fields, instruction, changes, source_file)
+        source_file = input_data.get("source_file") or input_data.get("file_path") or "uploaded_document"
+        edits = self._plan_edits(document_text, instruction)
+        updated_text = self._apply_edits_to_text(document_text, edits)
+        fields = self.adapter.extract_resume_fields(updated_text)
+        changes = self._changes(edits)
         artifact_id = new_id("updated_resume")
         path = settings.reports_dir / f"{artifact_id}.md"
         pdf_path = settings.reports_dir / f"{artifact_id}.pdf"
-        path.write_text(updated, encoding="utf-8")
-        self._write_updated_pdf(pdf_path, updated, updated_resume_text, source_file, edit)
+        report = self._build_edit_report(updated_text, instruction, changes, source_file, edits)
+        path.write_text(report, encoding="utf-8")
+        pdf_result = self._write_updated_pdf(pdf_path, updated_text, source_file, edits)
         return {
-            "updated_resume_markdown": updated,
+            "updated_resume_markdown": report,
             "updated_resume_path": str(path),
             "updated_resume_pdf_path": str(pdf_path),
-            "updated_summary": self._extract_summary(updated_resume_text),
+            "updated_summary": self._extract_summary(updated_text),
             "changes": changes,
             "instruction_used": instruction,
             "fields": fields,
+            "edit_count": len(edits),
+            "pdf_edit_status": pdf_result,
         }
 
-    def _infer_changes(self, instruction: str, edit: dict[str, str] | None = None) -> list[str]:
-        lowered = instruction.lower()
-        changes: list[str] = []
-        if edit:
-            changes.append(f"Update experience from {edit['old']} to {edit['new']} in the resume summary.")
-        if any(term in lowered for term in ["agentic", "agent", "tool calling", "workflow"]):
-            changes.append("Add agentic AI and tool-calling experience.")
-        if "rag" in lowered or "retrieval" in lowered:
-            changes.append("Emphasize RAG and source-grounded retrieval.")
-        if any(term in lowered for term in ["speech", "audio", "asr", "recording"]):
-            changes.append("Emphasize speech-to-text and ASR evaluation experience.")
-        if any(term in lowered for term in ["fastapi", "backend", "api"]):
-            changes.append("Emphasize FastAPI/backend production engineering.")
-        if any(term in lowered for term in ["evaluation", "eval", "quality", "metrics"]):
-            changes.append("Strengthen evaluation framework and quality metrics positioning.")
-        if any(term in lowered for term in ["recruiter", "portfolio", "project"]):
-            changes.append("Make the resume more recruiter-facing and project-oriented.")
-        return changes or ["Apply the supplied instruction while preserving the original resume facts."]
+    def _plan_edits(self, document_text: str, instruction: str) -> list[DocumentEdit]:
+        edits: list[DocumentEdit] = []
+        edits.extend(self._explicit_replacements(instruction))
+        edits.extend(self._field_edits(document_text, instruction))
+        return self._dedupe_edits(edits)
 
-    def _build_updated_resume(self, resume_text: str, fields: dict[str, str], instruction: str, changes: list[str], source_file: str) -> str:
-        name = fields.get("candidate_name", "Candidate")
-        role = fields.get("target_role", "AI/ML Professional")
-        skills = fields.get("skills", "Python, ML systems, evaluation, document AI, speech workflows")
-        timestamp = datetime.now(timezone.utc).isoformat()
-        agentic_section = "\n".join(
-            [
-                "## Agentic AI Resume Update",
-                "",
-                f"Target positioning: {role}",
-                "",
-                "### Updated Profile",
-                (
-                    f"{name} is positioned as an AI systems engineer who can connect document intelligence, speech processing, "
-                    "RAG, tool calling, evaluation, and backend APIs into practical local-first workflows. The profile highlights "
-                    "workflow intelligence: planning tool calls, extracting document evidence, transcribing user instructions, "
-                    "updating structured outputs, evaluating quality, and generating auditable reports."
-                ),
-                "",
-                "### Added / Strengthened Experience Bullets",
-                "- Built local-first agentic AI workflows that connect OCR, ASR, translation, retrieval, summarization, evaluation, and report generation.",
-                "- Designed tool-calling pipelines where an agent plans document extraction, audio transcription, resume revision, source-grounded retrieval, and quality checks.",
-                "- Implemented RAG-style evidence retrieval with citations, chunk scores, source files, and unsupported-claim handling.",
-                "- Developed evaluation-integrated AI systems with field accuracy, OCR CER, ASR WER/CER, retrieval hit rate, and summary coverage scoring.",
-                "- Built production-style FastAPI and CLI interfaces for modular AI tools, local persistence, and downloadable Markdown/JSON reports.",
-                "",
-                "### Instruction Extracted From Recording",
-                instruction.strip() or "No transcript was available from the recording. Mock/local ASR fallback was used.",
-                "",
-                "### Changes Applied",
-                *[f"- {change}" for change in changes],
-                "",
-                "### Skills To Surface",
-                skills,
-                "",
-                "---",
-                "",
-                "## Updated Resume Text",
-                "",
-                resume_text.strip(),
-                "",
-                f"_Generated locally from {Path(source_file).name} at {timestamp}._",
-            ]
+    def _explicit_replacements(self, instruction: str) -> list[DocumentEdit]:
+        edits: list[DocumentEdit] = []
+        quoted = re.finditer(
+            r"(?:replace|change|update)\s+[\"'](?P<old>.+?)[\"']\s+(?:with|to)\s+[\"'](?P<new>.+?)[\"']",
+            instruction,
+            flags=re.IGNORECASE | re.DOTALL,
         )
-        return agentic_section
+        for match in quoted:
+            edits.append(DocumentEdit("explicit replacement", match.group("old").strip(), match.group("new").strip()))
 
-    def _apply_instruction_edits(self, resume_text: str, instruction: str) -> tuple[str, dict[str, str] | None]:
-        target = self._target_experience(instruction)
-        if not target:
-            return resume_text, None
-        updated, old = self._replace_summary_experience(resume_text, target)
-        if not old:
-            return resume_text, None
-        return updated, {"old": old, "new": target}
+        plain = re.finditer(
+            r"(?:replace|change|update)\s+(?P<old>[A-Za-z0-9][^.\n]{1,80}?)\s+(?:with|to)\s+(?P<new>[A-Za-z0-9][^.\n]{1,80})",
+            instruction,
+            flags=re.IGNORECASE,
+        )
+        for match in plain:
+            old = self._clean_instruction_value(match.group("old"))
+            new = self._clean_instruction_value(match.group("new"))
+            if old and new and not self._looks_like_field_name(old):
+                edits.append(DocumentEdit("explicit replacement", old, new))
+        return edits
 
-    def _target_experience(self, instruction: str) -> str | None:
+    def _field_edits(self, document_text: str, instruction: str) -> list[DocumentEdit]:
+        field_patterns = {
+            "experience": r"\b\d+\+?\s*(?:years?|yrs?)\b",
+            "email": r"[\w.\-+]+@[\w.\-]+\.\w+",
+            "phone": r"(?:\+\d{1,3}\s*)?\d{10}",
+        }
+        edits: list[DocumentEdit] = []
+        lowered = instruction.lower()
+        for field, old_pattern in field_patterns.items():
+            target = self._target_for_field(instruction, field)
+            if not target:
+                continue
+            old = self._find_in_scope(document_text, old_pattern, self._scope_from_instruction(lowered))
+            if old:
+                edits.append(DocumentEdit(field, old, self._normalize_field_value(field, target), self._scope_from_instruction(lowered)))
+
+        title_target = self._target_for_field(instruction, "title") or self._target_for_field(instruction, "role")
+        if title_target:
+            title_old = self._current_title(document_text)
+            if title_old:
+                edits.append(DocumentEdit("title", title_old, title_target, "header"))
+        return edits
+
+    def _target_for_field(self, instruction: str, field: str) -> str | None:
+        aliases = {
+            "experience": r"(?:experience|years?\s+of\s+experience)",
+            "email": r"(?:email|mail)",
+            "phone": r"(?:phone|mobile|contact\s+number)",
+            "title": r"(?:title|headline|designation)",
+            "role": r"(?:role)",
+        }
+        alias = aliases[field]
         patterns = [
-            r"\bexperience\b[^.\n]*?\b(?:to|as)\s+(\d+\+?\s*(?:years?|yrs?))\b",
-            r"\b(?:to|as)\s+(\d+\+?\s*(?:years?|yrs?))\b[^.\n]*?\bexperience\b",
+            rf"\b{alias}\b[^.\n]*?\b(?:to|as)\s+(?P<value>[^.\n]+)",
+            rf"\b(?:set|update|change)\s+(?:the\s+)?{alias}\s+(?:to|as)\s+(?P<value>[^.\n]+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, instruction, flags=re.IGNORECASE)
             if match:
-                value = re.sub(r"\s+", " ", match.group(1)).strip()
-                return re.sub(r"\byrs?\b", "years", value, flags=re.IGNORECASE)
+                return self._clean_instruction_value(match.group("value"))
         return None
 
-    def _replace_summary_experience(self, resume_text: str, target: str) -> tuple[str, str | None]:
-        summary = re.search(
-            r"(?P<prefix>^SUMMARY\s*\n)(?P<body>.*?)(?=\n[A-Z][A-Z &/+-]{3,}\s*\n|\Z)",
-            resume_text,
+    def _scope_from_instruction(self, lowered_instruction: str) -> str:
+        if "summary" in lowered_instruction or "profile" in lowered_instruction:
+            return "summary"
+        if "header" in lowered_instruction:
+            return "header"
+        return "document"
+
+    def _find_in_scope(self, document_text: str, pattern: str, scope: str) -> str | None:
+        target_text = self._section_text(document_text, "SUMMARY") if scope == "summary" else document_text
+        match = re.search(pattern, target_text, flags=re.IGNORECASE)
+        return match.group(0) if match else None
+
+    def _current_title(self, document_text: str) -> str | None:
+        lines = [line.strip() for line in document_text.splitlines() if line.strip() and not set(line.strip()) <= {"_"}]
+        if len(lines) > 1 and any(term in lines[1].lower() for term in ["scientist", "engineer", "research", "developer", "analyst", "manager"]):
+            return lines[1]
+        return None
+
+    def _apply_edits_to_text(self, document_text: str, edits: list[DocumentEdit]) -> str:
+        updated = document_text
+        for edit in edits:
+            if edit.scope == "summary":
+                updated = self._replace_in_section(updated, "SUMMARY", edit.old, edit.new)
+            else:
+                updated = self._replace_once(updated, edit.old, edit.new)
+        return updated
+
+    def _replace_in_section(self, text: str, section_name: str, old: str, new: str) -> str:
+        section = re.search(
+            rf"(?P<prefix>^{re.escape(section_name)}\s*\n)(?P<body>.*?)(?=\n[A-Z][A-Z &/+-]{{3,}}\s*\n|\Z)",
+            text,
             flags=re.DOTALL | re.MULTILINE,
         )
-        experience_pattern = re.compile(r"\b\d+\+?\s*(?:years?|yrs?)\b", flags=re.IGNORECASE)
-        if summary:
-            body = summary.group("body")
-            match = experience_pattern.search(body)
-            if match:
-                new_body = body[: match.start()] + target + body[match.end() :]
-                return resume_text[: summary.start("body")] + new_body + resume_text[summary.end("body") :], match.group(0)
-        match = experience_pattern.search(resume_text)
-        if not match:
-            return resume_text, None
-        return resume_text[: match.start()] + target + resume_text[match.end() :], match.group(0)
+        if not section:
+            return self._replace_once(text, old, new)
+        body = self._replace_once(section.group("body"), old, new)
+        return text[: section.start("body")] + body + text[section.end("body") :]
 
-    def _extract_summary(self, resume_text: str) -> str:
-        summary = re.search(
-            r"^SUMMARY\s*\n(?P<body>.*?)(?=\n[A-Z][A-Z &/+-]{3,}\s*\n|\Z)",
-            resume_text,
-            flags=re.DOTALL | re.MULTILINE,
-        )
-        if summary:
-            return re.sub(r"\s+", " ", summary.group("body")).strip()
-        return ""
+    def _replace_once(self, text: str, old: str, new: str) -> str:
+        pattern = re.compile(re.escape(old), flags=re.IGNORECASE)
+        return pattern.sub(new, text, count=1)
 
-    def _write_updated_pdf(
-        self,
-        path: Path,
-        markdown_text: str,
-        updated_resume_text: str,
-        source_file: str,
-        edit: dict[str, str] | None,
-    ) -> None:
+    def _write_updated_pdf(self, path: Path, updated_text: str, source_file: str, edits: list[DocumentEdit]) -> dict:
         source_path = Path(source_file)
-        if edit and source_path.exists() and source_path.suffix.lower() == ".pdf":
-            if self._write_preserving_pdf(path, source_path, edit["old"], edit["new"]):
-                return
-        self._write_simple_pdf(path, updated_resume_text if updated_resume_text.strip() else markdown_text)
+        if source_path.exists() and source_path.suffix.lower() == ".pdf" and edits:
+            result = self._edit_existing_pdf(path, source_path, edits)
+            if result["applied"]:
+                return result
+        self._write_simple_pdf(path, updated_text)
+        return {
+            "mode": "generated_text_pdf",
+            "applied": 0,
+            "requested": len(edits),
+            "warning": "Could not edit the original PDF text layer. Generated a text PDF fallback.",
+        }
 
-    def _write_preserving_pdf(self, output_path: Path, source_path: Path, old_text: str, new_text: str) -> bool:
+    def _edit_existing_pdf(self, output_path: Path, source_path: Path, edits: list[DocumentEdit]) -> dict:
         try:
             import fitz  # type: ignore
         except Exception:
-            return False
+            return {"mode": "original_pdf", "applied": 0, "requested": len(edits), "warning": "PyMuPDF is not installed."}
+        applied = 0
         try:
             with fitz.open(source_path) as document:
-                changed = False
-                for page in document:
-                    rects = page.search_for(old_text)
-                    for rect in rects:
-                        page.add_redact_annot(rect, fill=(1, 1, 1))
-                        changed = True
-                    if rects:
-                        page.apply_redactions()
-                        for rect in rects:
-                            page.insert_textbox(
-                                rect,
-                                new_text,
-                                fontsize=max(8, min(11, rect.height * 0.72)),
-                                fontname="helv",
-                                color=(0, 0, 0),
-                                align=0,
-                            )
-                if not changed:
-                    return False
+                for edit in edits:
+                    if self._apply_pdf_edit(document, edit):
+                        applied += 1
+                if not applied:
+                    return {"mode": "original_pdf", "applied": 0, "requested": len(edits), "warning": "No matching selectable PDF text found."}
                 document.save(output_path, garbage=4, deflate=True)
-            return True
-        except Exception:
-            return False
+            return {"mode": "original_pdf", "applied": applied, "requested": len(edits)}
+        except Exception as exc:
+            return {"mode": "original_pdf", "applied": applied, "requested": len(edits), "warning": str(exc)}
+
+    def _apply_pdf_edit(self, document: object, edit: DocumentEdit) -> bool:
+        changed = False
+        for page in document:
+            rects = page.search_for(edit.old)
+            if not rects:
+                continue
+            rect = rects[0]
+            page.add_redact_annot(rect, fill=(1, 1, 1))
+            page.apply_redactions()
+            font_size = max(6, min(12, rect.height * 0.72))
+            write_rect = rect + (-1, -2, 80, 4)
+            page.insert_textbox(write_rect, edit.new, fontsize=font_size, fontname="helv", color=(0, 0, 0), align=0)
+            changed = True
+            break
+        return changed
+
+    def _build_edit_report(
+        self,
+        updated_text: str,
+        instruction: str,
+        changes: list[str],
+        source_file: str,
+        edits: list[DocumentEdit],
+    ) -> str:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        edit_rows = [f"- {edit.label}: `{edit.old}` -> `{edit.new}` ({edit.scope})" for edit in edits]
+        return "\n".join(
+            [
+                "## Document Edit Report",
+                "",
+                f"Source file: {Path(source_file).name}",
+                f"Generated at: {timestamp}",
+                "",
+                "### Instruction",
+                instruction.strip() or "No edit instruction was provided.",
+                "",
+                "### Applied Edits",
+                *(edit_rows or ["- No concrete text edit could be inferred from the instruction."]),
+                "",
+                "### Changes",
+                *(f"- {change}" for change in changes),
+                "",
+                "### Updated Text Extract",
+                "",
+                updated_text.strip(),
+            ]
+        )
+
+    def _changes(self, edits: list[DocumentEdit]) -> list[str]:
+        if not edits:
+            return ["No concrete text replacement was applied. Provide an instruction like: replace 'old text' with 'new text'."]
+        return [f"Update {edit.label} from {edit.old} to {edit.new}." for edit in edits]
+
+    def _extract_summary(self, text: str) -> str:
+        summary = self._section_text(text, "SUMMARY")
+        return re.sub(r"\s+", " ", summary).strip()
+
+    def _section_text(self, text: str, section_name: str) -> str:
+        section = re.search(
+            rf"^{re.escape(section_name)}\s*\n(?P<body>.*?)(?=\n[A-Z][A-Z &/+-]{{3,}}\s*\n|\Z)",
+            text,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+        return section.group("body") if section else ""
+
+    def _dedupe_edits(self, edits: list[DocumentEdit]) -> list[DocumentEdit]:
+        output: list[DocumentEdit] = []
+        seen: set[tuple[str, str, str]] = set()
+        for edit in edits:
+            key = (edit.old.lower(), edit.new.lower(), edit.scope)
+            if edit.old and edit.new and edit.old.lower() != edit.new.lower() and key not in seen:
+                output.append(edit)
+                seen.add(key)
+        return output
+
+    def _clean_instruction_value(self, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", value).strip(" .,:;\"'")
+        cleaned = re.split(r"\s+\b(?:in|on)\s+the\s+(?:summary|profile|resume|pdf|document)\b", cleaned, flags=re.IGNORECASE)[0]
+        return cleaned
+
+    def _normalize_field_value(self, field: str, value: str) -> str:
+        if field == "experience":
+            value = re.sub(r"\byrs?\b", "years", value, flags=re.IGNORECASE)
+        return value
+
+    def _looks_like_field_name(self, value: str) -> bool:
+        normalized = re.sub(r"^(?:the|a|an)\s+", "", value.strip().lower())
+        return normalized in {"experience", "email", "phone", "mobile", "contact number", "title", "headline", "role", "summary", "profile"}
 
     def _write_simple_pdf(self, path: Path, text: str) -> None:
         lines = self._wrap_lines(text)

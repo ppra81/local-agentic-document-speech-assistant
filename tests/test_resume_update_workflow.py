@@ -1,4 +1,5 @@
 from assistant.agent.executor import AgentExecutor
+from assistant.tools.resume_update_tool import UpdateResumeFromInstructionTool
 
 
 def test_agent_updates_resume_from_recording_instruction():
@@ -53,3 +54,29 @@ Project Associate
     assert result.summary == "Data Scientist with 4 years at IIT Madras."
     assert output["fields"]["experience"] == "4 years"
     assert any("3+ years to 4 years" in change for change in output["changes"])
+
+
+def test_resume_update_edits_uploaded_pdf_text_layer(tmp_path):
+    fitz = __import__("fitz")
+    pdf_path = tmp_path / "resume.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "SUMMARY")
+    page.insert_text((72, 96), "Data Scientist with 3+ years at IIT Madras.")
+    document.save(pdf_path)
+    document.close()
+
+    output = UpdateResumeFromInstructionTool().run(
+        {
+            "resume_text": "SUMMARY\nData Scientist with 3+ years at IIT Madras.",
+            "instruction": "change the experience to 4 years in the summary",
+            "source_file": str(pdf_path),
+        }
+    )
+
+    updated_pdf = fitz.open(output["updated_resume_pdf_path"])
+    updated_text = "\n".join(page.get_text() for page in updated_pdf)
+    updated_pdf.close()
+    assert "4 years" in updated_text
+    assert output["pdf_edit_status"]["mode"] == "original_pdf"
+    assert output["pdf_edit_status"]["applied"] == 1

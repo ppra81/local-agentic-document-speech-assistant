@@ -19,7 +19,7 @@ Rice: ₹700
 Milk: ₹120
 Vegetables: ₹430
 Total Amount: ₹1,250`,
-  transcript: `This is a mock audio transcript. The speaker asks the assistant to summarize an invoice and identify the total amount due.`
+  transcript: `Replace "3+ years" with "4 years" in the summary.`
 };
 
 let inputMode = "upload";
@@ -242,7 +242,7 @@ function renderResult(data, workflow) {
   byId("changesApplied").textContent = (finalAnswer.changes || updateOutput.changes || []).join("; ") || "-";
   byId("updatedResume").textContent = updateOutput.updated_resume_markdown || "No updated resume generated for this workflow.";
   byId("audioTranscriptPreview").textContent = transcriptOutput.transcript || byId("audioTranscript").value || "No audio transcript extracted yet.";
-  byId("changeCheck").textContent = updateOutput.updated_resume_markdown ? "Resume update generated from transcript." : "No resume update artifact was generated.";
+  byId("changeCheck").textContent = updateOutput.updated_resume_markdown ? "Document edits generated from transcript." : "No document edit artifact was generated.";
 }
 
 function answerFromWorkflow(data, workflow) {
@@ -304,7 +304,7 @@ function clearUi() {
   byId("updatedResumePath").textContent = "-";
   byId("updatedResumePdfPath").textContent = "-";
   byId("changesApplied").textContent = "-";
-  byId("updatedResume").textContent = "No updated resume generated yet.";
+  byId("updatedResume").textContent = "No updated document generated yet.";
   byId("audioTranscriptPreview").textContent = "No audio transcript extracted yet.";
   byId("changeCheck").textContent = "No resume update run yet.";
   byId("audioTranscript").value = "";

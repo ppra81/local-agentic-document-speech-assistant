@@ -47,6 +47,5 @@ class GenerateReportTool(AssistantTool):
         lines.extend([f"- Source: {e.get('source_file')} | Chunk: {e.get('chunk_id')} | Score: {e.get('confidence'):.2f} | Text: {e.get('matched_text_snippet')}" for e in evidence] or ["- No evidence retrieved."])
         lines.extend(["", "## Evaluation"])
         lines.extend([f"- {k}: {v}" for k, v in metrics.items()] or ["- No metrics calculated."])
-        lines.extend(["", "## Notes", "This result was generated locally using mock adapters."])
+        lines.extend(["", "## Notes", "This result was generated locally from uploaded files, extracted text, transcript input, and deterministic document-edit tools."])
         return "\n".join(lines) + "\n"
-
