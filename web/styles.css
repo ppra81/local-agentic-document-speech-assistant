@@ -133,6 +133,12 @@ textarea {
   line-height: 1.45;
 }
 
+.audio-player {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+}
+
 button {
   margin-top: 0;
   border-color: var(--accent);

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Local Agentic Document Speech Assistant</title>
-    <link rel="stylesheet" href="styles.css?v=6" />
+    <link rel="stylesheet" href="styles.css?v=8" />
   </head>
   <body>
     <header>
@@ -36,6 +36,7 @@
           <label>Audio or transcript file
             <input id="audioUpload" type="file" accept=".txt,.md,.wav,.mp3,.m4a,.flac" />
           </label>
+          <audio id="audioPlayer" class="audio-player hidden" controls></audio>
           <div class="actions compact-actions">
             <button id="transcribeBtn" type="button" class="secondary">Transcribe Audio</button>
             <span id="transcriptStatus" class="status">No transcript yet</span>
@@ -89,11 +90,11 @@
         <label>Reference JSON for evaluation
           <textarea id="referenceJson" rows="7">{
   "fields": {
-    "vendor": "Example Medical Store",
-    "date": "2026-07-09",
-    "total_amount": "₹1,250"
+    "candidate_name": "Praneeth Reddy",
+    "target_role": "Data Scientist",
+    "skills": "Python, PyTorch, Hugging Face"
   },
-  "expected_terms": ["vendor", "date", "total"]
+  "expected_terms": ["agentic", "RAG", "evaluation", "FastAPI", "ASR"]
 }</textarea>
         </label>
 
@@ -129,10 +130,24 @@
             <div id="preview" class="docbox"><pre>Select an input or load a sample to preview source text.</pre></div>
           </div>
           <div>
+            <h2>Audio Transcript Used By Agent</h2>
+            <div class="docbox"><pre id="audioTranscriptPreview">No audio transcript extracted yet.</pre></div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div>
             <h2>Final Answer</h2>
             <div class="answerbox">
               <strong id="answer">No answer yet.</strong>
               <p id="summary">Run the workflow to generate a grounded summary.</p>
+            </div>
+          </div>
+          <div>
+            <h2>Agentic Change Check</h2>
+            <div class="answerbox">
+              <strong id="changeCheck">No resume update run yet.</strong>
+              <p>The updated resume panel below should include the transcript instruction, applied changes, and generated Markdown.</p>
             </div>
           </div>
         </div>
@@ -193,7 +208,12 @@
         <h2>Updated Resume</h2>
         <div class="artifact-grid updated-resume-meta">
           <div><span>Updated Resume Markdown</span><b id="updatedResumePath">-</b></div>
+          <div><span>Updated Resume PDF</span><b id="updatedResumePdfPath">-</b></div>
           <div><span>Changes Applied</span><b id="changesApplied">-</b></div>
+        </div>
+        <div class="toolbar updated-downloads">
+          <button id="downloadUpdatedPdf" type="button" class="secondary">Download Updated PDF</button>
+          <button id="downloadUpdatedMd" type="button" class="secondary">Download Updated Markdown</button>
         </div>
         <pre id="updatedResume">No updated resume generated yet.</pre>
 
@@ -202,6 +222,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=6"></script>
+    <script src="app.js?v=8"></script>
   </body>
 </html>

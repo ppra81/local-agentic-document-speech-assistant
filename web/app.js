@@ -193,6 +193,7 @@ async function ensureAudioTranscript(input) {
   if (existing) return existing;
   const transcript = await getRecordingTranscript(input);
   byId("audioTranscript").value = transcript;
+  byId("audioTranscriptPreview").textContent = transcript || "No audio transcript extracted yet.";
   byId("transcriptStatus").textContent = transcript ? "Transcript ready" : "No transcript returned";
   return transcript;
 }
@@ -218,7 +219,14 @@ async function transcribeSelectedAudio() {
       data = await post("/audio/transcribe", { file_path: byId("audioPath").value });
     }
     byId("audioTranscript").value = data.transcript || "";
-    byId("transcriptStatus").textContent = `${data.adapter || "ASR"} transcript ready`;
+    byId("audioTranscriptPreview").textContent = data.transcript || data.warning || "No transcript returned.";
+    if (data.warning && !data.transcript) {
+      byId("transcriptStatus").textContent = data.warning;
+      byId("transcriptStatus").className = "status error";
+    } else {
+      byId("transcriptStatus").textContent = `${data.adapter || "ASR"} transcript ready`;
+      byId("transcriptStatus").className = "status";
+    }
   } catch (error) {
     byId("transcriptStatus").textContent = error.message;
     byId("transcriptStatus").className = "status error";
@@ -229,12 +237,13 @@ async function transcribeSelectedAudio() {
 
 function renderResult(data, workflow) {
   const agentReport = data.report?.report || data.report || {};
-  const finalAnswer = data.fields || data.summary || data.answer ? data : agentReport.final_answer || {};
+  const finalAnswer = agentReport.final_answer || (data.fields || data.summary || data.answer ? data : {});
   const planSteps = data.plan?.steps || agentReport.agent_plan?.steps || [];
   const tools = agentReport.tools_used || planSteps.map((step) => step.tool) || [];
   const citations = data.citations || agentReport.retrieved_evidence || data.results || [];
   const metrics = agentReport.evaluation_metrics || data.metrics || data.report?.evaluation_metrics || {};
   const fields = finalAnswer.fields || {};
+  const transcriptOutput = agentReport.intermediate_outputs?.tool_transcribe_audio || {};
   const updateOutput = agentReport.intermediate_outputs?.tool_update_resume_from_instruction || {};
 
   byId("result").textContent = JSON.stringify(data, null, 2);
@@ -252,8 +261,11 @@ function renderResult(data, workflow) {
   byId("jsonPath").textContent = data.report?.json_path || data.json_path || "-";
   byId("markdownPath").textContent = data.report?.markdown_path || data.markdown_path || "-";
   byId("updatedResumePath").textContent = finalAnswer.updated_resume_path || updateOutput.updated_resume_path || "-";
+  byId("updatedResumePdfPath").textContent = finalAnswer.updated_resume_pdf_path || updateOutput.updated_resume_pdf_path || "-";
   byId("changesApplied").textContent = (finalAnswer.changes || updateOutput.changes || []).join("; ") || "-";
   byId("updatedResume").textContent = updateOutput.updated_resume_markdown || "No updated resume generated for this workflow.";
+  byId("audioTranscriptPreview").textContent = transcriptOutput.transcript || byId("audioTranscript").value || "No audio transcript extracted yet.";
+  byId("changeCheck").textContent = updateOutput.updated_resume_markdown ? "Resume update generated from transcript." : "No resume update artifact was generated.";
 }
 
 function answerFromWorkflow(data, workflow) {
@@ -313,8 +325,11 @@ function clearUi() {
   byId("jsonPath").textContent = "-";
   byId("markdownPath").textContent = "-";
   byId("updatedResumePath").textContent = "-";
+  byId("updatedResumePdfPath").textContent = "-";
   byId("changesApplied").textContent = "-";
   byId("updatedResume").textContent = "No updated resume generated yet.";
+  byId("audioTranscriptPreview").textContent = "No audio transcript extracted yet.";
+  byId("changeCheck").textContent = "No resume update run yet.";
   byId("audioTranscript").value = "";
   byId("transcriptStatus").textContent = "No transcript yet";
   byId("transcriptStatus").className = "status";
@@ -345,6 +360,10 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 }
 
+function filenameFromPath(path) {
+  return String(path).split(/[\\/]/).pop();
+}
+
 byId("runBtn").addEventListener("click", runWorkflow);
 byId("clearBtn").addEventListener("click", clearUi);
 byId("transcribeBtn").addEventListener("click", transcribeSelectedAudio);
@@ -353,9 +372,38 @@ byId("downloadMd").addEventListener("click", () => {
   const md = lastResult.report?.markdown_path || lastResult.markdown_path || "Run a report workflow first.";
   download("assistant-report-link.md", md, "text/markdown");
 });
+byId("downloadUpdatedPdf").addEventListener("click", () => {
+  const path = byId("updatedResumePdfPath").textContent;
+  if (!path || path === "-") return;
+  window.location.href = `/reports/file/${encodeURIComponent(filenameFromPath(path))}`;
+});
+byId("downloadUpdatedMd").addEventListener("click", () => {
+  const path = byId("updatedResumePath").textContent;
+  if (!path || path === "-") return;
+  window.location.href = `/reports/file/${encodeURIComponent(filenameFromPath(path))}`;
+});
 byId("docUpload").addEventListener("change", async () => {
   const file = byId("docUpload").files[0];
   if (file) renderPreview(await readDocumentFile(file));
+});
+byId("audioUpload").addEventListener("change", () => {
+  const file = byId("audioUpload").files[0];
+  if (!file) return;
+  const player = byId("audioPlayer");
+  if (file.type.startsWith("audio") || /\.(wav|mp3|m4a|flac)$/i.test(file.name)) {
+    player.src = URL.createObjectURL(file);
+    player.classList.remove("hidden");
+  } else {
+    player.removeAttribute("src");
+    player.classList.add("hidden");
+  }
+  byId("audioTranscript").value = "";
+  byId("audioTranscriptPreview").textContent = "Audio selected. Click Transcribe Audio to extract the transcript.";
+  byId("transcriptStatus").textContent = "Audio selected";
+  byId("transcriptStatus").className = "status";
+});
+byId("audioTranscript").addEventListener("input", () => {
+  byId("audioTranscriptPreview").textContent = byId("audioTranscript").value || "No audio transcript extracted yet.";
 });
 byId("sampleText").addEventListener("input", () => renderPreview(byId("sampleText").value));
 

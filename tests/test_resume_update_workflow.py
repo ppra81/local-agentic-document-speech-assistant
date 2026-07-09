@@ -27,3 +27,4 @@ B.E., ECE | CGPA: 7.5
     assert "tool_update_resume_from_instruction" in tools
     assert result.answer == "Updated resume generated from the document and recording instruction."
     assert "updated_resume_path" in result.report["report"]["final_answer"]
+    assert "updated_resume_pdf_path" in result.report["report"]["final_answer"]

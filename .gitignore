@@ -9,5 +9,5 @@ venv/
 .local_data/
 reports/*.json
 reports/*.md
+reports/*.pdf
 !reports/.gitkeep
-

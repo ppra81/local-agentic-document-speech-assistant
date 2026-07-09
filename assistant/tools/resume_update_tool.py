@@ -13,7 +13,7 @@ class UpdateResumeFromInstructionTool(AssistantTool):
     name = "tool_update_resume_from_instruction"
     description = "Update a resume/profile document using transcribed audio or text instructions."
     input_schema = {"resume_text": "str", "instruction": "str", "source_file": "str optional"}
-    output_schema = {"updated_resume_markdown": "str", "updated_resume_path": "str", "changes": "list"}
+    output_schema = {"updated_resume_markdown": "str", "updated_resume_path": "str", "updated_resume_pdf_path": "str", "changes": "list"}
 
     def __init__(self) -> None:
         self.adapter = LocalRuleBasedAdapter()
@@ -27,10 +27,13 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         updated = self._build_updated_resume(resume_text, fields, instruction, changes, source_file)
         artifact_id = new_id("updated_resume")
         path = settings.reports_dir / f"{artifact_id}.md"
+        pdf_path = settings.reports_dir / f"{artifact_id}.pdf"
         path.write_text(updated, encoding="utf-8")
+        self._write_simple_pdf(pdf_path, updated)
         return {
             "updated_resume_markdown": updated,
             "updated_resume_path": str(path),
+            "updated_resume_pdf_path": str(pdf_path),
             "changes": changes,
             "instruction_used": instruction,
             "fields": fields,
@@ -98,3 +101,50 @@ class UpdateResumeFromInstructionTool(AssistantTool):
             ]
         )
         return agentic_section
+
+    def _write_simple_pdf(self, path: Path, text: str) -> None:
+        lines = self._wrap_lines(text)
+        objects: list[str] = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        content_lines = ["BT", "/F1 10 Tf", "50 750 Td", "12 TL"]
+        for line in lines[:56]:
+            content_lines.append(f"({self._pdf_escape(line)}) Tj")
+            content_lines.append("T*")
+        content_lines.append("ET")
+        stream = "\n".join(content_lines)
+        objects.append(f"<< /Length {len(stream.encode('latin-1', errors='replace'))} >>\nstream\n{stream}\nendstream")
+        pdf = "%PDF-1.4\n"
+        offsets = [0]
+        for idx, obj in enumerate(objects, 1):
+            offsets.append(len(pdf.encode("latin-1")))
+            pdf += f"{idx} 0 obj\n{obj}\nendobj\n"
+        xref_start = len(pdf.encode("latin-1"))
+        pdf += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+        for offset in offsets[1:]:
+            pdf += f"{offset:010d} 00000 n \n"
+        pdf += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF\n"
+        path.write_bytes(pdf.encode("latin-1", errors="replace"))
+
+    def _wrap_lines(self, text: str, width: int = 92) -> list[str]:
+        output: list[str] = []
+        for raw in text.replace("\r\n", "\n").splitlines():
+            line = raw.strip()
+            if not line:
+                output.append("")
+                continue
+            while len(line) > width:
+                split_at = line.rfind(" ", 0, width)
+                if split_at <= 0:
+                    split_at = width
+                output.append(line[:split_at])
+                line = line[split_at:].strip()
+            output.append(line)
+        return output
+
+    def _pdf_escape(self, text: str) -> str:
+        safe = text.encode("latin-1", errors="replace").decode("latin-1")
+        return safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
