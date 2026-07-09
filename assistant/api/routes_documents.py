@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from fastapi import APIRouter, File, UploadFile
 
@@ -80,3 +81,15 @@ async def extract_text(file: UploadFile = File(...)) -> dict:
     content = await file.read()
     text = extract_text_from_upload_bytes(content, file.filename or "uploaded.txt")
     return {"filename": file.filename, "text": text}
+
+
+@router.post("/upload")
+async def upload_document(file: UploadFile = File(...)) -> dict:
+    content = await file.read()
+    safe_name = Path(file.filename or "uploaded_document.txt").name
+    upload_dir = settings.data_dir / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    path = upload_dir / safe_name
+    path.write_bytes(content)
+    text = extract_text_from_upload_bytes(content, safe_name)
+    return {"filename": safe_name, "file_path": str(path), "text": text}

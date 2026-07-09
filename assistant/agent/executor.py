@@ -121,6 +121,7 @@ class AgentExecutor:
             context["final_answer"] = {
                 **current,
                 "answer": "Updated resume generated from the document and recording instruction.",
+                "summary": output.get("updated_summary") or current.get("summary", ""),
                 "updated_resume_path": output.get("updated_resume_path"),
                 "updated_resume_pdf_path": output.get("updated_resume_pdf_path"),
                 "changes": output.get("changes", []),

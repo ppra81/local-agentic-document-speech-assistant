@@ -24,6 +24,7 @@ Total Amount: ₹1,250`,
 
 let inputMode = "upload";
 let lastResult = {};
+let uploadedDocument = null;
 
 function byId(id) {
   return document.getElementById(id);
@@ -78,12 +79,13 @@ async function collectInput() {
     return { text, filePath: "sample_input.txt", audioText: text };
   }
   if (inputMode === "upload") {
-    const docText = docFile ? await readDocumentFile(docFile) : null;
+    const uploaded = docFile ? await uploadDocumentFile(docFile) : null;
+    const docText = uploaded ? uploaded.text : null;
     const audioText = byId("audioTranscript").value.trim() || (audioFile && isTextFile(audioFile) ? await audioFile.text() : null);
     if (docText) renderPreview(docText);
     return {
       text: docText,
-      filePath: docFile ? docFile.name : byId("docPath").value,
+      filePath: uploaded ? uploaded.file_path : byId("docPath").value,
       audioText,
       audioPath: audioFile ? audioFile.name : byId("audioPath").value
     };
@@ -97,44 +99,19 @@ function isTextFile(file) {
 }
 
 async function readDocumentFile(file) {
-  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-    const buffer = await file.arrayBuffer();
-    const raw = new TextDecoder("latin1").decode(buffer);
-    const text = extractSimplePdfText(raw);
-    if (!text.startsWith("This PDF does not expose")) return text;
-    return extractTextViaApi(file);
-  }
-  return file.text();
+  return (await uploadDocumentFile(file)).text;
 }
 
-function extractSimplePdfText(rawPdf) {
-  const direct = [...rawPdf.matchAll(/\((.*?)\)\s*Tj/gs)].map((match) => match[1]);
-  const arrayMatches = [...rawPdf.matchAll(/\[(.*?)\]\s*TJ/gs)]
-    .flatMap((match) => [...match[1].matchAll(/\((.*?)\)/gs)].map((item) => item[1]));
-  const matches = direct.concat(arrayMatches);
-  if (!matches.length) {
-    return "This PDF does not expose embedded plain text in the local browser demo. Use a text file or connect a real OCR/PDF adapter.";
-  }
-  return matches.map(decodePdfText).join("\n");
-}
-
-function decodePdfText(value) {
-  return value
-    .replace(/\\\(/g, "(")
-    .replace(/\\\)/g, ")")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t");
-}
-
-async function extractTextViaApi(file) {
+async function uploadDocumentFile(file) {
+  const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
+  if (uploadedDocument?.cacheKey === cacheKey) return uploadedDocument;
   const form = new FormData();
   form.append("file", file);
-  const response = await fetch(`${apiBase()}/documents/extract-text`, { method: "POST", body: form });
+  const response = await fetch(`${apiBase()}/documents/upload`, { method: "POST", body: form });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.detail || "PDF text extraction failed.");
-  return data.text;
+  if (!response.ok) throw new Error(data.detail || "Document upload failed.");
+  uploadedDocument = { ...data, cacheKey };
+  return uploadedDocument;
 }
 
 function parseReference() {
@@ -384,6 +361,7 @@ byId("downloadUpdatedMd").addEventListener("click", () => {
 });
 byId("docUpload").addEventListener("change", async () => {
   const file = byId("docUpload").files[0];
+  uploadedDocument = null;
   if (file) renderPreview(await readDocumentFile(file));
 });
 byId("audioUpload").addEventListener("change", () => {

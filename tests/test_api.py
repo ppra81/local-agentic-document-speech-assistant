@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from assistant.api.app import app
 
@@ -16,6 +17,17 @@ def test_audio_transcribe_upload_endpoint_accepts_text_transcript():
     )
     assert response.status_code == 200
     assert "agentic AI" in response.json()["transcript"]
+
+
+def test_document_upload_endpoint_saves_file_and_extracts_text():
+    response = TestClient(app).post(
+        "/documents/upload",
+        files={"file": ("resume.txt", b"SUMMARY\nData Scientist with 3+ years.\n", "text/plain")},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert Path(payload["file_path"]).exists()
+    assert "3+ years" in payload["text"]
 
 
 def test_report_file_download_route_serves_report_file():

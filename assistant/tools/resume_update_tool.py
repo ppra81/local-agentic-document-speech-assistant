@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from assistant.adapters.local_rule_based_adapter import LocalRuleBasedAdapter
 from assistant.config import settings
@@ -22,26 +23,30 @@ class UpdateResumeFromInstructionTool(AssistantTool):
         resume_text = input_data.get("resume_text") or input_data.get("text", "")
         instruction = input_data.get("instruction") or input_data.get("transcript") or input_data.get("request", "")
         source_file = input_data.get("source_file") or input_data.get("file_path") or "uploaded_resume"
-        fields = self.adapter.extract_resume_fields(resume_text)
-        changes = self._infer_changes(instruction)
-        updated = self._build_updated_resume(resume_text, fields, instruction, changes, source_file)
+        updated_resume_text, edit = self._apply_instruction_edits(resume_text, instruction)
+        fields = self.adapter.extract_resume_fields(updated_resume_text)
+        changes = self._infer_changes(instruction, edit)
+        updated = self._build_updated_resume(updated_resume_text, fields, instruction, changes, source_file)
         artifact_id = new_id("updated_resume")
         path = settings.reports_dir / f"{artifact_id}.md"
         pdf_path = settings.reports_dir / f"{artifact_id}.pdf"
         path.write_text(updated, encoding="utf-8")
-        self._write_simple_pdf(pdf_path, updated)
+        self._write_updated_pdf(pdf_path, updated, updated_resume_text, source_file, edit)
         return {
             "updated_resume_markdown": updated,
             "updated_resume_path": str(path),
             "updated_resume_pdf_path": str(pdf_path),
+            "updated_summary": self._extract_summary(updated_resume_text),
             "changes": changes,
             "instruction_used": instruction,
             "fields": fields,
         }
 
-    def _infer_changes(self, instruction: str) -> list[str]:
+    def _infer_changes(self, instruction: str, edit: dict[str, str] | None = None) -> list[str]:
         lowered = instruction.lower()
         changes: list[str] = []
+        if edit:
+            changes.append(f"Update experience from {edit['old']} to {edit['new']} in the resume summary.")
         if any(term in lowered for term in ["agentic", "agent", "tool calling", "workflow"]):
             changes.append("Add agentic AI and tool-calling experience.")
         if "rag" in lowered or "retrieval" in lowered:
@@ -93,7 +98,7 @@ class UpdateResumeFromInstructionTool(AssistantTool):
                 "",
                 "---",
                 "",
-                "## Original Resume Text",
+                "## Updated Resume Text",
                 "",
                 resume_text.strip(),
                 "",
@@ -101,6 +106,100 @@ class UpdateResumeFromInstructionTool(AssistantTool):
             ]
         )
         return agentic_section
+
+    def _apply_instruction_edits(self, resume_text: str, instruction: str) -> tuple[str, dict[str, str] | None]:
+        target = self._target_experience(instruction)
+        if not target:
+            return resume_text, None
+        updated, old = self._replace_summary_experience(resume_text, target)
+        if not old:
+            return resume_text, None
+        return updated, {"old": old, "new": target}
+
+    def _target_experience(self, instruction: str) -> str | None:
+        patterns = [
+            r"\bexperience\b[^.\n]*?\b(?:to|as)\s+(\d+\+?\s*(?:years?|yrs?))\b",
+            r"\b(?:to|as)\s+(\d+\+?\s*(?:years?|yrs?))\b[^.\n]*?\bexperience\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, instruction, flags=re.IGNORECASE)
+            if match:
+                value = re.sub(r"\s+", " ", match.group(1)).strip()
+                return re.sub(r"\byrs?\b", "years", value, flags=re.IGNORECASE)
+        return None
+
+    def _replace_summary_experience(self, resume_text: str, target: str) -> tuple[str, str | None]:
+        summary = re.search(
+            r"(?P<prefix>^SUMMARY\s*\n)(?P<body>.*?)(?=\n[A-Z][A-Z &/+-]{3,}\s*\n|\Z)",
+            resume_text,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+        experience_pattern = re.compile(r"\b\d+\+?\s*(?:years?|yrs?)\b", flags=re.IGNORECASE)
+        if summary:
+            body = summary.group("body")
+            match = experience_pattern.search(body)
+            if match:
+                new_body = body[: match.start()] + target + body[match.end() :]
+                return resume_text[: summary.start("body")] + new_body + resume_text[summary.end("body") :], match.group(0)
+        match = experience_pattern.search(resume_text)
+        if not match:
+            return resume_text, None
+        return resume_text[: match.start()] + target + resume_text[match.end() :], match.group(0)
+
+    def _extract_summary(self, resume_text: str) -> str:
+        summary = re.search(
+            r"^SUMMARY\s*\n(?P<body>.*?)(?=\n[A-Z][A-Z &/+-]{3,}\s*\n|\Z)",
+            resume_text,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+        if summary:
+            return re.sub(r"\s+", " ", summary.group("body")).strip()
+        return ""
+
+    def _write_updated_pdf(
+        self,
+        path: Path,
+        markdown_text: str,
+        updated_resume_text: str,
+        source_file: str,
+        edit: dict[str, str] | None,
+    ) -> None:
+        source_path = Path(source_file)
+        if edit and source_path.exists() and source_path.suffix.lower() == ".pdf":
+            if self._write_preserving_pdf(path, source_path, edit["old"], edit["new"]):
+                return
+        self._write_simple_pdf(path, updated_resume_text if updated_resume_text.strip() else markdown_text)
+
+    def _write_preserving_pdf(self, output_path: Path, source_path: Path, old_text: str, new_text: str) -> bool:
+        try:
+            import fitz  # type: ignore
+        except Exception:
+            return False
+        try:
+            with fitz.open(source_path) as document:
+                changed = False
+                for page in document:
+                    rects = page.search_for(old_text)
+                    for rect in rects:
+                        page.add_redact_annot(rect, fill=(1, 1, 1))
+                        changed = True
+                    if rects:
+                        page.apply_redactions()
+                        for rect in rects:
+                            page.insert_textbox(
+                                rect,
+                                new_text,
+                                fontsize=max(8, min(11, rect.height * 0.72)),
+                                fontname="helv",
+                                color=(0, 0, 0),
+                                align=0,
+                            )
+                if not changed:
+                    return False
+                document.save(output_path, garbage=4, deflate=True)
+            return True
+        except Exception:
+            return False
 
     def _write_simple_pdf(self, path: Path, text: str) -> None:
         lines = self._wrap_lines(text)
